@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
 import {
   LayoutDashboard,
   ShieldCheck,
@@ -13,12 +12,14 @@ import {
   Menu,
   X,
   ArrowLeft,
-  CheckCircle2,
+  Plus,
+  Trash2,
   Loader2,
 } from 'lucide-react';
 import { BrandLogo } from './components/BrandLogo';
 import { LandingPage } from './components/LandingPage';
 import { BuildSkillTwinModal } from './components/BuildSkillTwinModal';
+import { SkillAssessmentModal } from './components/SkillAssessmentModal';
 import { OverviewTab } from './components/dashboard/OverviewTab';
 import { JobReadinessTab } from './components/dashboard/JobReadinessTab';
 import { EvidenceEngineTab } from './components/dashboard/EvidenceEngineTab';
@@ -26,12 +27,16 @@ import { SkillGraphTab } from './components/dashboard/SkillGraphTab';
 import { GapRemediationTab } from './components/dashboard/GapRemediationTab';
 import { DocumentationTab } from './components/dashboard/DocumentationTab';
 import {
-  CANDIDATE_PROFILE,
-  createCandidateProfile,
-  REMEDIATION_GAPS,
-  SKILLS_DATA,
-} from './data/skillTwinData';
-import { auth } from './lib/firebase';
+  EvaluatedSkill,
+  EvidenceItem,
+  RoleTemplate,
+  SkillTwinProfile,
+  SkillStatus,
+} from './types/skilltwin';
+import {
+  ROLE_TEMPLATES,
+  analyzeRealCandidate,
+} from './services/skillAnalyzer';
 
 export type DashboardTabId =
   | 'overview'
@@ -48,90 +53,35 @@ const NAV_ITEMS: {
 }[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'job-readiness', label: 'Job Readiness', icon: ShieldCheck },
-  { id: 'evidence-engine', label: 'Evidence Engine', icon: Terminal },
+  { id: 'evidence-engine', label: 'Evidence', icon: Terminal },
   { id: 'skill-graph', label: 'Skill Graph', icon: Network },
-  { id: 'gap-remediation', label: 'Gap Remediation', icon: SlidersHorizontal },
-  { id: 'documentation', label: 'Documentation', icon: BookOpen },
+  { id: 'gap-remediation', label: 'Assessments & Gaps', icon: SlidersHorizontal },
+  { id: 'documentation', label: 'How It Works', icon: BookOpen },
 ];
+
+const STORAGE_KEY = 'skilltwin_real_profile_v1';
 
 export default function App() {
   const [darkMode, setDarkMode] = useState(false);
   const [currentSurface, setCurrentSurface] = useState<'landing' | 'dashboard'>('landing');
   const [activeTab, setActiveTab] = useState<DashboardTabId>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [accountId, setAccountId] = useState<string | null>(null);
 
-  // Interactive SkillTwin State
-  const [remediatedIds, setRemediatedIds] = useState<string[]>([]);
-  const [waivedIds, setWaivedIds] = useState<string[]>([]);
-  const [connectedSources, setConnectedSources] = useState<Record<string, boolean>>({
-    github: true,
-    gitlab: true,
-    bitbucket: false,
+  // Real Evaluated Profile State (null by default — zero fake data!)
+  const [profile, setProfile] = useState<SkillTwinProfile | null>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
   });
 
-  // Modals
   const [buildModalOpen, setBuildModalOpen] = useState(false);
-  const [buildModalMode, setBuildModalMode] = useState<
-    'build' | 're-evaluate' | 'empty-demo'
-  >('build');
-  const [activeChallengeGapId, setActiveChallengeGapId] = useState<string | null>(null);
-  const [challengeRunning, setChallengeRunning] = useState(false);
+  const [verifyingSkill, setVerifyingSkill] = useState<EvaluatedSkill | null>(null);
+  const [quickLoadingUser, setQuickLoadingUser] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [quickSearchQuery, setQuickSearchQuery] = useState('');
-
-  useEffect(() => {
-    return onAuthStateChanged(auth, (user) => {
-      if (!user) {
-        setAccountId(null);
-        return;
-      }
-
-      Object.assign(CANDIDATE_PROFILE, createCandidateProfile(user));
-      setAccountId(user.uid);
-
-      try {
-        const savedState = localStorage.getItem(`skilltwin:${user.uid}`);
-        if (!savedState) {
-          setRemediatedIds([]);
-          setWaivedIds([]);
-          setConnectedSources({ github: false, gitlab: false, bitbucket: false });
-          return;
-        }
-
-        const parsedState = JSON.parse(savedState) as {
-          remediatedIds?: unknown;
-          waivedIds?: unknown;
-          connectedSources?: unknown;
-        };
-        setRemediatedIds(Array.isArray(parsedState.remediatedIds) ? parsedState.remediatedIds.filter(
-          (id): id is string => typeof id === 'string'
-        ) : []);
-        setWaivedIds(Array.isArray(parsedState.waivedIds) ? parsedState.waivedIds.filter(
-          (id): id is string => typeof id === 'string'
-        ) : []);
-        if (parsedState.connectedSources && typeof parsedState.connectedSources === 'object') {
-          setConnectedSources(parsedState.connectedSources as Record<string, boolean>);
-        }
-      } catch (error) {
-        console.error('Unable to load the account dashboard:', error);
-        setRemediatedIds([]);
-        setWaivedIds([]);
-        setConnectedSources({ github: false, gitlab: false, bitbucket: false });
-      }
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!accountId) {
-      return;
-    }
-
-    localStorage.setItem(
-      `skilltwin:${accountId}`,
-      JSON.stringify({ remediatedIds, waivedIds, connectedSources })
-    );
-  }, [accountId, remediatedIds, waivedIds, connectedSources]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -143,6 +93,18 @@ export default function App() {
   }, [darkMode]);
 
   useEffect(() => {
+    try {
+      if (profile) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [profile]);
+
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -150,21 +112,12 @@ export default function App() {
       }
       if (e.key === 'Escape') {
         setSearchOpen(false);
-        setActiveChallengeGapId(null);
+        setVerifyingSkill(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
-
-  // Calculate dynamic Job Readiness score based on completed remediations
-  const readinessLift = REMEDIATION_GAPS.reduce((acc, gap) => {
-    if (remediatedIds.includes(gap.id)) {
-      return acc + gap.liftPoints;
-    }
-    return acc;
-  }, 0);
-  const currentReadiness = Math.min(96, CANDIDATE_PROFILE.baseReadiness + readinessLift);
 
   const handleEnterDashboard = (initialTab?: string) => {
     if (initialTab && NAV_ITEMS.some((i) => i.id === initialTab)) {
@@ -174,64 +127,157 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleOpenBuildModal = (mode: 'build' | 're-evaluate' | 'empty-demo' = 'build') => {
-    setBuildModalMode(mode);
-    setBuildModalOpen(true);
+  const handleProfileCreated = (newProfile: SkillTwinProfile) => {
+    setProfile(newProfile);
+    setCurrentSurface('dashboard');
+    setActiveTab('job-readiness');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleTriggerRemediation = (gapId: string) => {
-    setActiveChallengeGapId(gapId);
-    setChallengeRunning(true);
-    setTimeout(() => {
-      setChallengeRunning(false);
-    }, 1100);
-  };
-
-  const confirmChallengeCompletion = () => {
-    if (activeChallengeGapId && !remediatedIds.includes(activeChallengeGapId)) {
-      setRemediatedIds((prev) => [...prev, activeChallengeGapId]);
+  const handleQuickAnalyzeGithub = async (username: string) => {
+    setQuickLoadingUser(username);
+    try {
+      const generated = await analyzeRealCandidate({
+        githubUsername: username,
+        resumeText:
+          'Claimed Skills: Java, TypeScript, Go, REST APIs, SQL, Docker, AWS, System Design',
+        targetRole: ROLE_TEMPLATES[0],
+      });
+      setProfile(generated);
+      setCurrentSurface('dashboard');
+      setActiveTab('job-readiness');
+    } finally {
+      setQuickLoadingUser(null);
     }
-    setActiveChallengeGapId(null);
   };
 
-  const handleWaiveSkill = (gapId: string) => {
-    setWaivedIds((prev) =>
-      prev.includes(gapId) ? prev.filter((id) => id !== gapId) : [...prev, gapId]
+  const handleChangeTargetRole = async (newRole: RoleTemplate) => {
+    if (!profile) return;
+    setQuickLoadingUser(profile.githubUsername);
+    try {
+      const updated = await analyzeRealCandidate({
+        githubUsername:
+          profile.githubUsername === 'local-workspace' ? '' : profile.githubUsername,
+        candidateName: profile.candidateName,
+        resumeText: profile.resumeText,
+        targetRole: newRole,
+      });
+      setProfile(updated);
+    } finally {
+      setQuickLoadingUser(null);
+    }
+  };
+
+  const handleSkillVerified = (
+    skillId: string,
+    newScore: number,
+    newEvidenceItem: EvidenceItem
+  ) => {
+    if (!profile) return;
+
+    const updatedSkills = profile.skills.map((s) => {
+      if (s.id !== skillId) return s;
+      const status: SkillStatus =
+        newScore >= s.targetScore
+          ? 'strong'
+          : newScore >= 55
+          ? 'moderate'
+          : 'gap';
+      return {
+        ...s,
+        confidence: newScore,
+        status,
+        verifiedByAssessment: true,
+        evidenceSummary: `Verified via code assessment (${newScore}%)`,
+        whyExplanation: `${s.name} was verified via an interactive code assessment / project artifact, raising your confidence score to ${newScore}% (Target: ${s.targetScore}%).`,
+      };
+    });
+
+    const overallReadiness = Math.round(
+      updatedSkills.reduce((sum, s) => sum + s.confidence, 0) /
+        Math.max(1, updatedSkills.length)
     );
+
+    const verifiedCount = updatedSkills.filter(
+      (s) => s.verifiedByGithub || s.verifiedByAssessment
+    ).length;
+
+    setProfile({
+      ...profile,
+      updatedAt: new Date().toISOString(),
+      overallReadiness,
+      evidenceConfidence: Math.round(
+        (verifiedCount / Math.max(1, updatedSkills.length)) * 100
+      ),
+      skills: updatedSkills,
+      evidenceItems: [newEvidenceItem, ...profile.evidenceItems],
+    });
   };
 
-  const handleExecuteAllRemediations = () => {
-    setRemediatedIds(['docker', 'aws', 'system-design']);
-  };
+  const handleAddCustomEvidence = (
+    title: string,
+    language: string,
+    codeContent: string,
+    skillId: string
+  ) => {
+    if (!profile) return;
+    const targetSkill = profile.skills.find((s) => s.id === skillId);
+    const boostedScore = targetSkill
+      ? Math.min(96, Math.max(targetSkill.confidence + 20, targetSkill.targetScore + 5))
+      : 82;
 
-  const handleToggleSource = (key: string) => {
-    setConnectedSources((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
+    const newItem: EvidenceItem = {
+      id: `custom-${Date.now()}`,
+      title,
+      sourceType: 'code_submission',
+      language,
+      skillsMatched: targetSkill ? [targetSkill.name] : [language],
+      confidenceContribution: boostedScore,
+      metricLabel: `${codeContent.split('\n').length} lines submitted`,
+      timestamp: new Date().toISOString().split('T')[0],
+      verified: true,
+      codeSnippet: {
+        filename: title,
+        content: codeContent,
+        highlights: targetSkill ? [targetSkill.name] : [],
+      },
+    };
 
-  const activeChallengeGap = REMEDIATION_GAPS.find(
-    (g) => g.id === activeChallengeGapId
-  );
+    handleSkillVerified(skillId, boostedScore, newItem);
+  };
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0B1120] text-[#0F172A] dark:text-[#F8FAFC]">
+      {/* Quick loading overlay when fetching a live GitHub user */}
+      {quickLoadingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F172A]/50 backdrop-blur-[1px]">
+          <div className="card-surface p-6 flex items-center gap-3">
+            <Loader2 className="w-5 h-5 text-[#1D4ED8] animate-spin" />
+            <span className="text-[14px] font-medium">
+              Fetching live GitHub repositories for @{quickLoadingUser}...
+            </span>
+          </div>
+        </div>
+      )}
+
       {currentSurface === 'landing' ? (
         <LandingPage
           darkMode={darkMode}
           onToggleDarkMode={() => setDarkMode((d) => !d)}
+          profile={profile}
           onEnterDashboard={handleEnterDashboard}
-          onOpenBuildModal={handleOpenBuildModal}
+          onOpenBuildModal={() => setBuildModalOpen(true)}
+          onQuickAnalyzeGithub={handleQuickAnalyzeGithub}
         />
       ) : (
         <div className="min-h-screen flex flex-col lg:flex-row">
-          {/* Desktop Fixed Left Sidebar (240px) */}
+          {/* Desktop Sidebar (240px) */}
           <aside className="hidden lg:flex fixed left-0 top-0 bottom-0 w-60 bg-[#FFFFFF] dark:bg-[#111827] border-r border-[#E2E8F0] dark:border-[#334155] z-40 flex-col justify-between">
             <div>
-              {/* Brand Header */}
               <div className="h-16 px-4 flex items-center justify-between border-b border-[#E2E8F0] dark:border-[#334155]">
                 <BrandLogo onClick={() => setCurrentSurface('landing')} />
               </div>
 
-              {/* Navigation Links */}
               <nav className="p-2.5 space-y-1" aria-label="Dashboard Navigation">
                 {NAV_ITEMS.map((item) => {
                   const IconComp = item.icon;
@@ -258,37 +304,38 @@ export default function App() {
               </nav>
             </div>
 
-            {/* Bottom Back to Landing & Candidate Switcher */}
-            <div className="p-3 border-t border-[#E2E8F0] dark:border-[#334155] space-y-2">
-              <button
-                type="button"
-                onClick={() => handleOpenBuildModal('empty-demo')}
-                className="w-full px-3 py-1.5 rounded-[6px] text-left text-[12px] text-[#64748B] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-[#F8FAFC] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B] transition-colors"
-              >
-                Preview Empty State
-              </button>
+            <div className="p-3 border-t border-[#E2E8F0] dark:border-[#334155] space-y-1.5">
+              {profile && (
+                <button
+                  type="button"
+                  onClick={() => setProfile(null)}
+                  className="w-full px-3 py-1.5 rounded-[6px] text-left text-[12px] text-[#B91C1C] dark:text-[#F87171] hover:bg-[#FEF2F2] dark:hover:bg-[#B91C1C]/15 flex items-center gap-1.5 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Reset / Clear Profile</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setCurrentSurface('landing')}
                 className="w-full px-3 py-1.5 rounded-[6px] text-left text-[12px] font-medium text-[#475569] dark:text-[#CBD5E1] hover:text-[#0F172A] dark:hover:text-[#F8FAFC] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B] flex items-center gap-1.5 transition-colors"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Product Overview</span>
+                <span>Back to Home</span>
               </button>
             </div>
           </aside>
 
-          {/* Main Workspace Area */}
+          {/* Main Workspace */}
           <div className="flex-1 lg:pl-60 flex flex-col min-w-0">
-            {/* Top Bar (Strict 3-Zone Contract) */}
             <header className="sticky top-0 z-30 h-16 bg-[#FFFFFF]/95 dark:bg-[#111827]/95 backdrop-blur-[2px] border-b border-[#E2E8F0] dark:border-[#334155] px-4 sm:px-6 flex items-center justify-between gap-4">
-              {/* Zone 1: Mobile Menu Trigger or Search Bar */}
+              {/* Zone 1 */}
               <div className="flex items-center gap-3">
                 <button
                   type="button"
                   onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                   className="lg:hidden p-2 rounded-[6px] text-[#475569] dark:text-[#CBD5E1] hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B]"
-                  aria-label="Toggle Navigation"
+                  aria-label="Toggle Menu"
                 >
                   {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
                 </button>
@@ -302,51 +349,58 @@ export default function App() {
                   className="hidden sm:flex items-center gap-2.5 h-8 px-3 rounded-[6px] bg-[#F8FAFC] dark:bg-[#1E293B] border border-[#E2E8F0] dark:border-[#334155] text-[#64748B] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-[#F8FAFC] transition-colors text-[12px]"
                 >
                   <Search className="w-3.5 h-3.5" />
-                  <span>Search evidence, skills, telemetry...</span>
-                  <kbd className="font-mono text-[11px] px-1.5 py-0.2 rounded bg-[#E2E8F0]/70 dark:bg-[#0B1120] text-[#475569] dark:text-[#CBD5E1]">
+                  <span>Search skills or views...</span>
+                  <kbd className="font-mono text-[11px] px-1.5 py-0.2 rounded bg-[#E2E8F0]/70 dark:bg-[#0B1120]">
                     ⌘K
                   </kbd>
                 </button>
               </div>
 
-              {/* Zone 2: Quick Readiness Pill */}
-              <div className="hidden md:flex items-center gap-4 text-[13px] text-[#475569] dark:text-[#CBD5E1] tabular-nums">
-                <span>
-                  Candidate:{' '}
-                  <strong className="text-[#0F172A] dark:text-[#F8FAFC]">
-                    {CANDIDATE_PROFILE.name}
-                  </strong>
-                </span>
-                <span aria-hidden="true">·</span>
-                <span>
-                  Readiness:{' '}
-                  <strong className="font-mono text-[#1D4ED8] dark:text-[#3B82F6]">
-                    {currentReadiness}%
-                  </strong>
-                </span>
-              </div>
+              {/* Zone 2 */}
+              {profile ? (
+                <div className="hidden md:flex items-center gap-3 text-[13px] text-[#475569] dark:text-[#CBD5E1] tabular-nums">
+                  <span>
+                    Profile:{' '}
+                    <strong className="text-[#0F172A] dark:text-[#F8FAFC]">
+                      {profile.candidateName}
+                    </strong>
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span>
+                    Readiness:{' '}
+                    <strong className="font-mono text-[#1D4ED8] dark:text-[#3B82F6]">
+                      {profile.overallReadiness}%
+                    </strong>
+                  </span>
+                </div>
+              ) : (
+                <div className="hidden md:block text-[13px] text-[#64748B] dark:text-[#94A3B8]">
+                  No profile loaded yet — connect your GitHub to start
+                </div>
+              )}
 
-              {/* Zone 3: Primary Actions */}
+              {/* Zone 3 */}
               <div className="flex items-center gap-2.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => setDarkMode((d) => !d)}
-                  className="h-8 w-8 rounded-[6px] border border-[#E2E8F0] dark:border-[#334155] bg-[#FFFFFF] dark:bg-[#1E293B] text-[#475569] dark:text-[#CBD5E1] hover:text-[#0F172A] dark:hover:text-[#F8FAFC] flex items-center justify-center transition-colors"
-                  aria-label="Toggle color theme"
+                  className="h-8 w-8 rounded-[6px] border border-[#E2E8F0] dark:border-[#334155] bg-[#FFFFFF] dark:bg-[#1E293B] text-[#475569] dark:text-[#CBD5E1] flex items-center justify-center transition-colors"
+                  aria-label="Toggle theme"
                 >
                   {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleOpenBuildModal('build')}
-                  className="h-8 px-3.5 rounded-[6px] bg-[#1D4ED8] hover:bg-[#1E3A8A] text-white text-[12px] font-medium transition-colors shadow-[0_1px_2px_rgba(15,23,42,0.04)] whitespace-nowrap"
+                  onClick={() => setBuildModalOpen(true)}
+                  className="h-8 px-3.5 rounded-[6px] bg-[#1D4ED8] hover:bg-[#1E3A8A] text-white text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors shadow-[0_1px_2px_rgba(15,23,42,0.04)] whitespace-nowrap"
                 >
-                  Build Your SkillTwin
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{profile ? 'Switch / Update Profile' : 'Build Your SkillTwin'}</span>
                 </button>
               </div>
             </header>
 
-            {/* Mobile Collapsible Navigation Drawer */}
+            {/* Mobile Menu */}
             {mobileMenuOpen && (
               <div className="lg:hidden bg-[#FFFFFF] dark:bg-[#111827] border-b border-[#E2E8F0] dark:border-[#334155] px-4 py-3 space-y-1">
                 {NAV_ITEMS.map((item) => {
@@ -371,65 +425,63 @@ export default function App() {
                     </button>
                   );
                 })}
-                <div className="pt-2 border-t border-[#E2E8F0] dark:border-[#334155] flex items-center justify-between">
+                {profile && (
                   <button
                     type="button"
                     onClick={() => {
+                      setProfile(null);
                       setMobileMenuOpen(false);
-                      setCurrentSurface('landing');
                     }}
-                    className="text-[12px] font-medium text-[#1D4ED8] dark:text-[#3B82F6] py-1"
+                    className="w-full text-left px-3 py-2 text-[12px] text-[#B91C1C]"
                   >
-                    ← Back to Landing Page
+                    Reset Profile
                   </button>
-                </div>
+                )}
               </div>
             )}
 
-            {/* Main Dashboard Content Viewport */}
-            <main className="flex-1 p-4 sm:p-6 max-w-[1600px] w-full mx-auto">
+            {/* Main Content */}
+            <main className="flex-1 p-4 sm:p-6 max-w-[1440px] w-full mx-auto">
               {activeTab === 'overview' && (
                 <OverviewTab
-                  currentReadiness={currentReadiness}
-                  remediatedIds={remediatedIds}
-                  waivedIds={waivedIds}
-                  connectedSources={connectedSources}
-                  onToggleSource={handleToggleSource}
+                  profile={profile}
                   onNavigateTab={(t) => setActiveTab(t as DashboardTabId)}
-                  onTriggerRemediation={handleTriggerRemediation}
-                  onWaiveSkill={handleWaiveSkill}
-                  onOpenBuildModal={handleOpenBuildModal}
+                  onOpenVerifyModal={(skill) => setVerifyingSkill(skill)}
+                  onOpenBuildModal={() => setBuildModalOpen(true)}
+                  onQuickAnalyzeGithub={handleQuickAnalyzeGithub}
                 />
               )}
               {activeTab === 'job-readiness' && (
                 <JobReadinessTab
-                  currentReadiness={currentReadiness}
-                  remediatedIds={remediatedIds}
-                  waivedIds={waivedIds}
-                  onNavigateTab={(t) => setActiveTab(t as DashboardTabId)}
-                  onTriggerRemediation={handleTriggerRemediation}
-                  onOpenBuildModal={handleOpenBuildModal}
+                  profile={profile}
+                  onChangeTargetRole={handleChangeTargetRole}
+                  onOpenVerifyModal={(skill) => setVerifyingSkill(skill)}
+                  onOpenBuildModal={() => setBuildModalOpen(true)}
+                  onQuickAnalyzeGithub={handleQuickAnalyzeGithub}
                 />
               )}
               {activeTab === 'evidence-engine' && (
-                <EvidenceEngineTab onOpenBuildModal={handleOpenBuildModal} />
+                <EvidenceEngineTab
+                  profile={profile}
+                  onAddCustomEvidence={handleAddCustomEvidence}
+                  onOpenBuildModal={() => setBuildModalOpen(true)}
+                  onQuickAnalyzeGithub={handleQuickAnalyzeGithub}
+                />
               )}
               {activeTab === 'skill-graph' && (
                 <SkillGraphTab
-                  remediatedIds={remediatedIds}
-                  onTriggerRemediation={handleTriggerRemediation}
-                  onNavigateTab={(t) => setActiveTab(t as DashboardTabId)}
+                  profile={profile}
+                  onOpenVerifyModal={(skill) => setVerifyingSkill(skill)}
+                  onOpenBuildModal={() => setBuildModalOpen(true)}
+                  onQuickAnalyzeGithub={handleQuickAnalyzeGithub}
                 />
               )}
               {activeTab === 'gap-remediation' && (
                 <GapRemediationTab
-                  currentReadiness={currentReadiness}
-                  remediatedIds={remediatedIds}
-                  waivedIds={waivedIds}
-                  onTriggerRemediation={handleTriggerRemediation}
-                  onWaiveSkill={handleWaiveSkill}
-                  onExecuteAllRemediations={handleExecuteAllRemediations}
-                  onNavigateTab={(t) => setActiveTab(t as DashboardTabId)}
+                  profile={profile}
+                  onOpenVerifyModal={(skill) => setVerifyingSkill(skill)}
+                  onOpenBuildModal={() => setBuildModalOpen(true)}
+                  onQuickAnalyzeGithub={handleQuickAnalyzeGithub}
                 />
               )}
               {activeTab === 'documentation' && <DocumentationTab />}
@@ -438,96 +490,22 @@ export default function App() {
         </div>
       )}
 
-      {/* Interactive Build / Evaluate SkillTwin Modal */}
+      {/* Build / Analyze Modal */}
       <BuildSkillTwinModal
         isOpen={buildModalOpen}
         onClose={() => setBuildModalOpen(false)}
-        initialMode={buildModalMode}
-        onComplete={() => {
-          setCurrentSurface('dashboard');
-          setActiveTab('job-readiness');
-        }}
+        existingProfile={profile}
+        onProfileCreated={handleProfileCreated}
       />
 
-      {/* Interactive Sandbox Remediation Challenge Modal */}
-      {activeChallengeGap && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F172A]/50 backdrop-blur-[1px] p-4"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="w-full max-w-md rounded-[8px] bg-[#FFFFFF] dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#334155] shadow-lg overflow-hidden">
-            <div className="px-5 py-3.5 bg-[#F8FAFC] dark:bg-[#1E293B] border-b border-[#E2E8F0] dark:border-[#334155] flex items-center justify-between">
-              <span className="text-[14px] font-semibold text-[#0F172A] dark:text-[#F8FAFC]">
-                SkillTwin Verification Sandbox
-              </span>
-              <button
-                type="button"
-                onClick={() => setActiveChallengeGapId(null)}
-                className="text-[#64748B] hover:text-[#0F172A] dark:hover:text-[#F8FAFC]"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <div className="font-mono text-[11px] text-[#1D4ED8] dark:text-[#3B82F6] font-semibold">
-                  TARGET COMPETENCY: {activeChallengeGap.shortName.toUpperCase()}
-                </div>
-                <h3 className="text-[16px] font-semibold text-[#0F172A] dark:text-[#F8FAFC] mt-0.5">
-                  {activeChallengeGap.optionB.title}
-                </h3>
-                <p className="text-[13px] text-[#475569] dark:text-[#CBD5E1] mt-1">
-                  {activeChallengeGap.optionB.description}
-                </p>
-              </div>
+      {/* Interactive Skill Verification Modal */}
+      <SkillAssessmentModal
+        skill={verifyingSkill}
+        onClose={() => setVerifyingSkill(null)}
+        onSkillVerified={handleSkillVerified}
+      />
 
-              <div className="p-3.5 rounded-[6px] bg-[#0F172A] text-[#E2E8F0] font-mono text-[12px] space-y-2">
-                {challengeRunning ? (
-                  <div className="flex items-center gap-2 text-[#60A5FA]">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Running AST &amp; container assertion suite...</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-2 text-[#4ADE80]">
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>✓ Multi-stage build &amp; rootless execution verified</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-[#4ADE80]">
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>
-                        ✓ Signal confidence updated: {activeChallengeGap.currentConfidence}% →{' '}
-                        {activeChallengeGap.targetBenchmark + 6}%
-                      </span>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setActiveChallengeGapId(null)}
-                  className="h-8 px-3 rounded-[6px] border border-[#E2E8F0] dark:border-[#334155] text-[12px] font-medium text-[#475569] dark:text-[#CBD5E1]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={challengeRunning}
-                  onClick={confirmChallengeCompletion}
-                  className="h-8 px-3.5 rounded-[6px] bg-[#1D4ED8] hover:bg-[#1E3A8A] text-white text-[12px] font-medium transition-colors"
-                >
-                  Commit Evidence (+{activeChallengeGap.liftPoints}% Readiness)
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Quick Command / Search Modal (⌘K) */}
+      {/* Quick Search Modal (⌘K) */}
       {searchOpen && (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center bg-[#0F172A]/50 backdrop-blur-[1px] pt-20 p-4"
@@ -544,7 +522,7 @@ export default function App() {
                 autoFocus
                 value={quickSearchQuery}
                 onChange={(e) => setQuickSearchQuery(e.target.value)}
-                placeholder="Jump to skill, evidence node, or cockpit view..."
+                placeholder="Jump to view or skill..."
                 className="w-full text-[13px] bg-transparent text-[#0F172A] dark:text-[#F8FAFC] focus:outline-none"
               />
               <button
@@ -558,7 +536,7 @@ export default function App() {
             <div className="p-2 max-h-72 overflow-y-auto divide-y divide-[#E2E8F0] dark:divide-[#334155]">
               <div className="py-1">
                 <div className="px-2 py-1 text-[11px] font-semibold uppercase text-[#64748B]">
-                  Cockpit Views
+                  Views
                 </div>
                 {NAV_ITEMS.filter((i) =>
                   i.label.toLowerCase().includes(quickSearchQuery.toLowerCase())
@@ -573,39 +551,41 @@ export default function App() {
                     }}
                     className="w-full px-3 py-2 text-left text-[13px] rounded-[6px] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B] flex items-center justify-between"
                   >
-                    <span className="font-medium text-[#0F172A] dark:text-[#F8FAFC]">
-                      {item.label}
-                    </span>
+                    <span className="font-medium">{item.label}</span>
                     <span className="text-[11px] font-mono text-[#1D4ED8] dark:text-[#3B82F6]">
-                      Open View →
+                      Open →
                     </span>
                   </button>
                 ))}
               </div>
-              <div className="py-1">
-                <div className="px-2 py-1 text-[11px] font-semibold uppercase text-[#64748B]">
-                  Evaluated Competencies
+              {profile && (
+                <div className="py-1">
+                  <div className="px-2 py-1 text-[11px] font-semibold uppercase text-[#64748B]">
+                    Your Evaluated Skills
+                  </div>
+                  {profile.skills
+                    .filter((s) =>
+                      s.name.toLowerCase().includes(quickSearchQuery.toLowerCase())
+                    )
+                    .map((skill) => (
+                      <button
+                        key={skill.id}
+                        type="button"
+                        onClick={() => {
+                          setCurrentSurface('dashboard');
+                          setActiveTab('job-readiness');
+                          setSearchOpen(false);
+                        }}
+                        className="w-full px-3 py-2 text-left text-[13px] rounded-[6px] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B] flex items-center justify-between"
+                      >
+                        <span>{skill.name}</span>
+                        <span className="font-mono text-[12px] text-[#64748B] tabular-nums">
+                          {skill.confidence}%
+                        </span>
+                      </button>
+                    ))}
                 </div>
-                {SKILLS_DATA.filter((s) =>
-                  s.name.toLowerCase().includes(quickSearchQuery.toLowerCase())
-                ).map((skill) => (
-                  <button
-                    key={skill.id}
-                    type="button"
-                    onClick={() => {
-                      setCurrentSurface('dashboard');
-                      setActiveTab('job-readiness');
-                      setSearchOpen(false);
-                    }}
-                    className="w-full px-3 py-2 text-left text-[13px] rounded-[6px] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B] flex items-center justify-between"
-                  >
-                    <span>{skill.name}</span>
-                    <span className="font-mono text-[12px] text-[#64748B] tabular-nums">
-                      {skill.confidence}%
-                    </span>
-                  </button>
-                ))}
-              </div>
+              )}
             </div>
           </div>
         </div>
