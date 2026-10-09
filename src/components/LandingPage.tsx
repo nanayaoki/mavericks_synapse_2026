@@ -18,6 +18,8 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { BrandLogo } from './BrandLogo';
+import { signInWithPopup } from 'firebase/auth';
+import { auth, googleProvider } from '../lib/firebase';
 
 interface LandingPageProps {
   darkMode: boolean;
@@ -211,6 +213,54 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [selectedComparisonSkill, setSelectedComparisonSkill] = useState<string>('Docker');
   const [selectedGraphBranch, setSelectedGraphBranch] = useState<string>('java-branch');
   const [audienceTab, setAudienceTab] = useState<'candidates' | 'recruiters'>('candidates');
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [signInError, setSignInError] = useState<string | null>(null);
+
+  const handleSignIn = async () => {
+    if (isSigningIn) {
+      return;
+    }
+
+    setIsSigningIn(true);
+    setSignInError(null);
+
+    try {
+      await signInWithPopup(auth, googleProvider);
+      onEnterDashboard('overview');
+    } catch (error) {
+      console.error('Google Sign-In Error:', error);
+      const errorCode =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String(error.code)
+          : '';
+
+      switch (errorCode) {
+        case 'auth/network-request-failed':
+          setSignInError('Unable to reach Google Sign-In. Check your connection and try again.');
+          break;
+        case 'auth/popup-closed-by-user':
+          setSignInError('Google Sign-In was cancelled.');
+          break;
+        case 'auth/popup-blocked':
+          setSignInError('Your browser blocked the sign-in popup. Allow popups and try again.');
+          break;
+        case 'auth/unauthorized-domain':
+          setSignInError('This website is not authorized in the Firebase Authentication settings.');
+          break;
+        case 'auth/operation-not-allowed':
+          setSignInError('Google Sign-In is not enabled in the Firebase Authentication settings.');
+          break;
+        default:
+          setSignInError(
+            errorCode
+              ? `Google Sign-In failed (${errorCode}). Check the browser console for details.`
+              : 'Google Sign-In could not be completed. Please try again.'
+          );
+      }
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
 
   const activeStage =
     PIPELINE_STAGES.find((s) => s.id === selectedStageId) || PIPELINE_STAGES[2];
@@ -221,8 +271,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   return (
     <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0B1120] text-[#0F172A] dark:text-[#F8FAFC] transition-colors duration-150">
       {/* SECTION 1: Minimal Navbar (Strict 3-Zone Contract) */}
-      <header className="sticky top-0 z-40 h-16 bg-[#FFFFFF]/95 dark:bg-[#111827]/95 backdrop-blur-[2px] border-b border-[#E2E8F0] dark:border-[#334155]">
-        <div className="max-w-[1280px] mx-auto h-full px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
+      <header className="sticky top-0 z-40 min-h-16 bg-[#FFFFFF]/95 dark:bg-[#111827]/95 backdrop-blur-[2px] border-b border-[#E2E8F0] dark:border-[#334155]">
+        <div className="max-w-[1280px] mx-auto h-16 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
           {/* Zone 1: Brand */}
           <BrandLogo onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} />
 
@@ -272,10 +322,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => onEnterDashboard('overview')}
+              onClick={handleSignIn}
+              disabled={isSigningIn}
               className="text-[14px] font-medium text-[#475569] dark:text-[#CBD5E1] hover:text-[#0F172A] dark:hover:text-[#F8FAFC] px-2.5 py-1.5 transition-colors whitespace-nowrap"
             >
-              Sign In
+              {isSigningIn ? 'Signing In...' : 'Sign In'}
             </button>
             <button
               type="button"
@@ -286,6 +337,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </button>
           </div>
         </div>
+        {signInError && (
+          <div
+            role="alert"
+            className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 pb-3 text-right text-[12px] text-[#B91C1C] dark:text-[#FCA5A5]"
+          >
+            {signInError}
+          </div>
+        )}
       </header>
 
       <main>
@@ -543,19 +602,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       <button
                         type="button"
                         onClick={() => setSelectedStageId(stage.id)}
-                        className={`w-full p-4 rounded-[8px] border text-left transition-colors flex items-center justify-between ${
-                          isSelected
-                            ? 'bg-[#F8FAFC] dark:bg-[#1E293B] border-[#1D4ED8] dark:border-[#3B82F6] shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
-                            : 'bg-[#FFFFFF] dark:bg-[#111827] border-[#E2E8F0] dark:border-[#334155] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B]/50'
-                        }`}
+                        className={`w-full p-4 rounded-[8px] border text-left transition-colors flex items-center justify-between ${isSelected
+                          ? 'bg-[#F8FAFC] dark:bg-[#1E293B] border-[#1D4ED8] dark:border-[#3B82F6] shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
+                          : 'bg-[#FFFFFF] dark:bg-[#111827] border-[#E2E8F0] dark:border-[#334155] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B]/50'
+                          }`}
                       >
                         <div className="flex items-center gap-3">
                           <span
-                            className={`w-6 h-6 rounded-[4px] font-mono text-[12px] font-semibold flex items-center justify-center ${
-                              isSelected
-                                ? 'bg-[#1D4ED8] text-white'
-                                : 'bg-[#F1F5F9] dark:bg-[#1E293B] text-[#475569] dark:text-[#CBD5E1]'
-                            }`}
+                            className={`w-6 h-6 rounded-[4px] font-mono text-[12px] font-semibold flex items-center justify-center ${isSelected
+                              ? 'bg-[#1D4ED8] text-white'
+                              : 'bg-[#F1F5F9] dark:bg-[#1E293B] text-[#475569] dark:text-[#CBD5E1]'
+                              }`}
                           >
                             0{idx + 1}
                           </span>
@@ -683,11 +740,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                           key={item.skill}
                           type="button"
                           onClick={() => setSelectedComparisonSkill(item.skill)}
-                          className={`w-full p-3.5 rounded-[6px] border text-left transition-colors ${
-                            active
-                              ? 'border-[#1D4ED8] dark:border-[#3B82F6] bg-[#F8FAFC] dark:bg-[#1E293B]'
-                              : 'border-[#E2E8F0] dark:border-[#334155] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B]/40'
-                          }`}
+                          className={`w-full p-3.5 rounded-[6px] border text-left transition-colors ${active
+                            ? 'border-[#1D4ED8] dark:border-[#3B82F6] bg-[#F8FAFC] dark:bg-[#1E293B]'
+                            : 'border-[#E2E8F0] dark:border-[#334155] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B]/40'
+                            }`}
                         >
                           <div className="flex items-center justify-between">
                             <span className="text-[15px] font-semibold text-[#0F172A] dark:text-[#F8FAFC]">
@@ -735,24 +791,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                         item.status === 'strong'
                           ? 'bg-[#15803D] dark:bg-[#4ADE80]'
                           : item.status === 'moderate'
-                          ? 'bg-[#1D4ED8] dark:bg-[#3B82F6]'
-                          : 'bg-[#B45309] dark:bg-[#FBBF24]';
+                            ? 'bg-[#1D4ED8] dark:bg-[#3B82F6]'
+                            : 'bg-[#B45309] dark:bg-[#FBBF24]';
                       const textColor =
                         item.status === 'strong'
                           ? 'text-[#15803D] dark:text-[#4ADE80]'
                           : item.status === 'moderate'
-                          ? 'text-[#1D4ED8] dark:text-[#3B82F6]'
-                          : 'text-[#B45309] dark:text-[#FBBF24]';
+                            ? 'text-[#1D4ED8] dark:text-[#3B82F6]'
+                            : 'text-[#B45309] dark:text-[#FBBF24]';
 
                       return (
                         <div
                           key={item.skill}
                           onClick={() => setSelectedComparisonSkill(item.skill)}
-                          className={`p-3.5 rounded-[6px] border cursor-pointer transition-colors ${
-                            active
-                              ? 'border-[#1D4ED8] dark:border-[#3B82F6] bg-[#F8FAFC] dark:bg-[#1E293B]'
-                              : 'border-[#E2E8F0] dark:border-[#334155] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B]/40'
-                          }`}
+                          className={`p-3.5 rounded-[6px] border cursor-pointer transition-colors ${active
+                            ? 'border-[#1D4ED8] dark:border-[#3B82F6] bg-[#F8FAFC] dark:bg-[#1E293B]'
+                            : 'border-[#E2E8F0] dark:border-[#334155] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B]/40'
+                            }`}
                         >
                           <div className="flex items-center justify-between">
                             <div>
@@ -859,8 +914,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       const borderClass = isSelected
                         ? 'border-2 border-[#1D4ED8] dark:border-[#3B82F6]'
                         : branch.active
-                        ? 'border border-[#1D4ED8]/50 dark:border-[#3B82F6]/50 hover:border-[#1D4ED8]'
-                        : 'border border-[#E2E8F0] dark:border-[#334155] hover:border-[#94A3B8]';
+                          ? 'border border-[#1D4ED8]/50 dark:border-[#3B82F6]/50 hover:border-[#1D4ED8]'
+                          : 'border border-[#E2E8F0] dark:border-[#334155] hover:border-[#94A3B8]';
 
                       return (
                         <div
@@ -879,11 +934,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                               {branch.label}
                             </div>
                             <div
-                              className={`text-[12px] font-mono tabular-nums mt-0.5 ${
-                                branch.active
-                                  ? 'text-[#1D4ED8] dark:text-[#3B82F6] font-medium'
-                                  : 'text-[#64748B] dark:text-[#94A3B8]'
-                              }`}
+                              className={`text-[12px] font-mono tabular-nums mt-0.5 ${branch.active
+                                ? 'text-[#1D4ED8] dark:text-[#3B82F6] font-medium'
+                                : 'text-[#64748B] dark:text-[#94A3B8]'
+                                }`}
                             >
                               {branch.confidence}%
                             </div>
@@ -922,11 +976,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     </h3>
                   </div>
                   <span
-                    className={`font-mono text-[18px] font-semibold tabular-nums ${
-                      activeBranch.active
-                        ? 'text-[#1D4ED8] dark:text-[#3B82F6]'
-                        : 'text-[#B45309] dark:text-[#FBBF24]'
-                    }`}
+                    className={`font-mono text-[18px] font-semibold tabular-nums ${activeBranch.active
+                      ? 'text-[#1D4ED8] dark:text-[#3B82F6]'
+                      : 'text-[#B45309] dark:text-[#FBBF24]'
+                      }`}
                   >
                     {activeBranch.confidence}%
                   </span>
@@ -969,22 +1022,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 <button
                   type="button"
                   onClick={() => setAudienceTab('candidates')}
-                  className={`px-3.5 py-1.5 rounded-[4px] text-[13px] font-medium transition-colors whitespace-nowrap ${
-                    audienceTab === 'candidates'
-                      ? 'bg-[#FFFFFF] dark:bg-[#111827] text-[#0F172A] dark:text-[#F8FAFC] shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
-                      : 'text-[#475569] dark:text-[#CBD5E1]'
-                  }`}
+                  className={`px-3.5 py-1.5 rounded-[4px] text-[13px] font-medium transition-colors whitespace-nowrap ${audienceTab === 'candidates'
+                    ? 'bg-[#FFFFFF] dark:bg-[#111827] text-[#0F172A] dark:text-[#F8FAFC] shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
+                    : 'text-[#475569] dark:text-[#CBD5E1]'
+                    }`}
                 >
                   For Candidates
                 </button>
                 <button
                   type="button"
                   onClick={() => setAudienceTab('recruiters')}
-                  className={`px-3.5 py-1.5 rounded-[4px] text-[13px] font-medium transition-colors whitespace-nowrap ${
-                    audienceTab === 'recruiters'
-                      ? 'bg-[#FFFFFF] dark:bg-[#111827] text-[#0F172A] dark:text-[#F8FAFC] shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
-                      : 'text-[#475569] dark:text-[#CBD5E1]'
-                  }`}
+                  className={`px-3.5 py-1.5 rounded-[4px] text-[13px] font-medium transition-colors whitespace-nowrap ${audienceTab === 'recruiters'
+                    ? 'bg-[#FFFFFF] dark:bg-[#111827] text-[#0F172A] dark:text-[#F8FAFC] shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
+                    : 'text-[#475569] dark:text-[#CBD5E1]'
+                    }`}
                 >
                   For Recruiters &amp; Hiring Managers
                 </button>

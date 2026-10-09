@@ -1,4 +1,5 @@
 import sarahAvatar from '../assets/images/sarah_jenks_avatar_1791484161676.jpg';
+import type { User } from 'firebase/auth';
 
 export type SkillCategory = 'strong' | 'moderate' | 'gap';
 
@@ -120,26 +121,48 @@ export interface RemediationGapItem {
 }
 
 export const CANDIDATE_PROFILE = {
-  name: 'Sarah Jenks',
-  id: 'US-9042-SJ',
-  auditId: 'ST-8942',
-  hexId: '0x9E74A1',
-  role: 'Backend Software Engineer',
-  levelTitle: 'L5 Senior Backend Engineer',
-  division: 'FinTech Core Systems',
+  name: 'Guest Candidate',
+  id: 'GUEST',
+  auditId: 'ST-GUEST',
+  hexId: '0xGUEST',
+  role: 'Software Engineer',
+  levelTitle: 'New SkillTwin Candidate',
+  division: 'Personal Workspace',
   benchmarkName: 'Tier-1 Distributed Systems Benchmark',
   avatarUrl: sarahAvatar,
-  baseReadiness: 81,
-  evidenceConfidence: 88.4,
-  verifiedSkillsCount: 12,
+  baseReadiness: 0,
+  evidenceConfidence: 0,
+  verifiedSkillsCount: 0,
   totalSkillsCount: 15,
-  activeReposCount: 6,
-  totalCommits: 1420,
-  authoredPRs: 82,
-  gpgFingerprint: '82FA 41DC 99E2 00B4',
-  githubHandle: '@sjenks-dev',
-  proofDigest: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+  activeReposCount: 0,
+  totalCommits: 0,
+  authoredPRs: 0,
+  gpgFingerprint: 'Not connected',
+  githubHandle: 'Not connected',
+  proofDigest: 'No evidence collected yet',
 };
+
+export const createCandidateProfile = (user: User) => ({
+  name: user.displayName || user.email?.split('@')[0] || 'New Candidate',
+  id: `USER-${user.uid.slice(0, 8).toUpperCase()}`,
+  auditId: `ST-${user.uid.slice(0, 6).toUpperCase()}`,
+  hexId: `0x${user.uid.slice(0, 6).toUpperCase()}`,
+  role: 'Software Engineer',
+  levelTitle: 'New SkillTwin Candidate',
+  division: 'Personal Workspace',
+  benchmarkName: 'SkillTwin Engineering Benchmark',
+  avatarUrl: user.photoURL || sarahAvatar,
+  baseReadiness: 0,
+  evidenceConfidence: 0,
+  verifiedSkillsCount: 0,
+  totalSkillsCount: SKILLS_DATA.length,
+  activeReposCount: 0,
+  totalCommits: 0,
+  authoredPRs: 0,
+  gpgFingerprint: 'Not connected',
+  githubHandle: 'Not connected',
+  proofDigest: 'No evidence collected yet',
+});
 
 export const SKILLS_DATA: SkillItem[] = [
   {

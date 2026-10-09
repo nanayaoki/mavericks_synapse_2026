@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { onAuthStateChanged } from 'firebase/auth';
 import {
   LayoutDashboard,
   ShieldCheck,
@@ -26,9 +27,11 @@ import { GapRemediationTab } from './components/dashboard/GapRemediationTab';
 import { DocumentationTab } from './components/dashboard/DocumentationTab';
 import {
   CANDIDATE_PROFILE,
+  createCandidateProfile,
   REMEDIATION_GAPS,
   SKILLS_DATA,
 } from './data/skillTwinData';
+import { auth } from './lib/firebase';
 
 export type DashboardTabId =
   | 'overview'
@@ -56,6 +59,7 @@ export default function App() {
   const [currentSurface, setCurrentSurface] = useState<'landing' | 'dashboard'>('landing');
   const [activeTab, setActiveTab] = useState<DashboardTabId>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [accountId, setAccountId] = useState<string | null>(null);
 
   // Interactive SkillTwin State
   const [remediatedIds, setRemediatedIds] = useState<string[]>([]);
@@ -75,6 +79,59 @@ export default function App() {
   const [challengeRunning, setChallengeRunning] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [quickSearchQuery, setQuickSearchQuery] = useState('');
+
+  useEffect(() => {
+    return onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        setAccountId(null);
+        return;
+      }
+
+      Object.assign(CANDIDATE_PROFILE, createCandidateProfile(user));
+      setAccountId(user.uid);
+
+      try {
+        const savedState = localStorage.getItem(`skilltwin:${user.uid}`);
+        if (!savedState) {
+          setRemediatedIds([]);
+          setWaivedIds([]);
+          setConnectedSources({ github: false, gitlab: false, bitbucket: false });
+          return;
+        }
+
+        const parsedState = JSON.parse(savedState) as {
+          remediatedIds?: unknown;
+          waivedIds?: unknown;
+          connectedSources?: unknown;
+        };
+        setRemediatedIds(Array.isArray(parsedState.remediatedIds) ? parsedState.remediatedIds.filter(
+          (id): id is string => typeof id === 'string'
+        ) : []);
+        setWaivedIds(Array.isArray(parsedState.waivedIds) ? parsedState.waivedIds.filter(
+          (id): id is string => typeof id === 'string'
+        ) : []);
+        if (parsedState.connectedSources && typeof parsedState.connectedSources === 'object') {
+          setConnectedSources(parsedState.connectedSources as Record<string, boolean>);
+        }
+      } catch (error) {
+        console.error('Unable to load the account dashboard:', error);
+        setRemediatedIds([]);
+        setWaivedIds([]);
+        setConnectedSources({ github: false, gitlab: false, bitbucket: false });
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!accountId) {
+      return;
+    }
+
+    localStorage.setItem(
+      `skilltwin:${accountId}`,
+      JSON.stringify({ remediatedIds, waivedIds, connectedSources })
+    );
+  }, [accountId, remediatedIds, waivedIds, connectedSources]);
 
   useEffect(() => {
     const root = document.documentElement;

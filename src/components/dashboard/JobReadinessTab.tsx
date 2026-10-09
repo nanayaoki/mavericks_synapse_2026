@@ -355,7 +355,7 @@ export const JobReadinessTab: React.FC<JobReadinessTabProps> = ({
               <tbody className="divide-y divide-[#E2E8F0] dark:divide-[#334155] tabular-nums">
                 <tr className="bg-[#F8FAFC] dark:bg-[#1E293B]/40 font-medium">
                   <td className="py-2.5 px-3 text-[#1D4ED8] dark:text-[#3B82F6]">
-                    Sarah Jenks (Current)
+                    {CANDIDATE_PROFILE.name} (Current)
                   </td>
                   <td className="py-2.5 px-3 text-right font-mono font-semibold text-[#15803D] dark:text-[#4ADE80]">
                     {currentReadiness}%
