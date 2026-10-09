@@ -16,6 +16,10 @@ import {
 } from 'lucide-react';
 import { EvaluatedSkill, SkillTwinProfile } from '../../types/skilltwin';
 import { EmptyProfileState } from './EmptyProfileState';
+import {
+  OverviewProfileInsights,
+  ProfileInsightsUpdate,
+} from './OverviewProfileInsights';
 
 interface OverviewTabProps {
   profile: SkillTwinProfile | null;
@@ -23,6 +27,7 @@ interface OverviewTabProps {
   onOpenVerifyModal: (skill: EvaluatedSkill) => void;
   onOpenBuildModal: () => void;
   onQuickAnalyzeGithub: (username: string) => void;
+  onSaveProfileInsights: (update: ProfileInsightsUpdate) => void;
 }
 
 export const OverviewTab: React.FC<OverviewTabProps> = ({
@@ -31,6 +36,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   onOpenVerifyModal,
   onOpenBuildModal,
   onQuickAnalyzeGithub,
+  onSaveProfileInsights,
 }) => {
   const [expandedWhyId, setExpandedWhyId] = useState<string | null>(null);
   const [exported, setExported] = useState(false);
@@ -144,6 +150,11 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           </button>
         </div>
       </div>
+
+      <OverviewProfileInsights
+        profile={profile}
+        onSave={onSaveProfileInsights}
+      />
 
       {/* Section 11: 3 Primary Summary Cards + Evidence Confidence */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

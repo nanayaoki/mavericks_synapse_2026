@@ -6,6 +6,7 @@ import {
   Network,
   SlidersHorizontal,
   BookOpen,
+  Map,
   Search,
   Sun,
   Moon,
@@ -21,11 +22,15 @@ import { LandingPage } from './components/LandingPage';
 import { BuildSkillTwinModal } from './components/BuildSkillTwinModal';
 import { SkillAssessmentModal } from './components/SkillAssessmentModal';
 import { OverviewTab } from './components/dashboard/OverviewTab';
+import {
+  ProfileInsightsUpdate,
+} from './components/dashboard/OverviewProfileInsights';
 import { JobReadinessTab } from './components/dashboard/JobReadinessTab';
 import { EvidenceEngineTab } from './components/dashboard/EvidenceEngineTab';
 import { SkillGraphTab } from './components/dashboard/SkillGraphTab';
 import { GapRemediationTab } from './components/dashboard/GapRemediationTab';
 import { DocumentationTab } from './components/dashboard/DocumentationTab';
+import { RoadmapTab } from './components/dashboard/RoadmapTab';
 import {
   EvaluatedSkill,
   EvidenceItem,
@@ -44,6 +49,7 @@ export type DashboardTabId =
   | 'evidence-engine'
   | 'skill-graph'
   | 'gap-remediation'
+  | 'roadmap'
   | 'documentation';
 
 const NAV_ITEMS: {
@@ -56,6 +62,7 @@ const NAV_ITEMS: {
   { id: 'evidence-engine', label: 'Evidence', icon: Terminal },
   { id: 'skill-graph', label: 'Skill Graph', icon: Network },
   { id: 'gap-remediation', label: 'Assessments & Gaps', icon: SlidersHorizontal },
+  { id: 'roadmap', label: 'Roadmap', icon: Map },
   { id: 'documentation', label: 'How It Works', icon: BookOpen },
 ];
 
@@ -130,8 +137,127 @@ export default function App() {
   const handleProfileCreated = (newProfile: SkillTwinProfile) => {
     setProfile(newProfile);
     setCurrentSurface('dashboard');
-    setActiveTab('job-readiness');
+    setActiveTab('overview');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSaveProfileInsights = (update: ProfileInsightsUpdate) => {
+    setProfile((currentProfile) => {
+      if (!currentProfile) return currentProfile;
+
+      const {
+        importedCandidateName,
+        ...profileUpdate
+      } = update;
+      const linkedInText = update.linkedinProfileText || '';
+      const resumeText = update.resumeText || '';
+      const matchesKeyword = (text: string, keyword: string) => {
+        const escapedKeyword = keyword
+          .trim()
+          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          .replace(/\s+/g, '\\s+');
+        return new RegExp(
+          `(^|[^\\p{L}\\p{N}])${escapedKeyword}(?=$|[^\\p{L}\\p{N}])`,
+          'iu'
+        ).test(text);
+      };
+      const normalizedResume = resumeText.toLowerCase();
+      const normalizedLinkedIn = linkedInText.toLowerCase();
+      const updatedSkills = currentProfile.skills.map((skill) => {
+        const roleSkill = currentProfile.targetRole.requiredSkills.find(
+          (requiredSkill) => requiredSkill.id === skill.id
+        );
+        const keywords = roleSkill?.keywords || [];
+        const claimedOnResume = keywords.some((keyword) =>
+          matchesKeyword(normalizedResume, keyword)
+        );
+        const claimedOnLinkedIn = keywords.some((keyword) =>
+          matchesKeyword(normalizedLinkedIn, keyword)
+        );
+
+        if (skill.verifiedByGithub || skill.verifiedByAssessment) {
+          return { ...skill, claimedOnResume, claimedOnLinkedIn };
+        }
+
+        const hasProfileClaim = claimedOnResume || claimedOnLinkedIn;
+        const confidence = hasProfileClaim ? 38 : 22;
+        const status: SkillStatus =
+          confidence >= skill.targetScore
+            ? 'strong'
+            : confidence >= 55
+            ? 'moderate'
+            : 'gap';
+        const claimSources = [
+          claimedOnResume ? 'resume' : '',
+          claimedOnLinkedIn ? 'LinkedIn' : '',
+        ].filter(Boolean);
+
+        return {
+          ...skill,
+          claimedOnResume,
+          claimedOnLinkedIn,
+          confidence,
+          status,
+          evidenceSummary: hasProfileClaim
+            ? `Claimed on ${claimSources.join(' and ')} · needs independent verification`
+            : 'No repository, resume, or LinkedIn evidence detected',
+          whyExplanation: hasProfileClaim
+            ? `${skill.name} appears in your ${claimSources.join(
+                ' and '
+              )} profile information, but a profile claim is not independent proof. Link a relevant repository or complete a verification assessment to demonstrate it.`
+            : `${skill.name} was not found in your resume or imported LinkedIn content, and no independent evidence is linked yet.`,
+          recommendedAction: hasProfileClaim
+            ? `Verify ${skill.name} with a repository or skill assessment.`
+            : `Add relevant ${skill.name} experience to your profile and provide evidence.`,
+        };
+      });
+      const overallReadiness = Math.round(
+        updatedSkills.reduce((sum, skill) => sum + skill.confidence, 0) /
+          Math.max(1, updatedSkills.length)
+      );
+
+      const roleSkillsMentioned = currentProfile.targetRole.requiredSkills
+        .filter((requiredSkill) =>
+          requiredSkill.keywords.some((keyword) =>
+              matchesKeyword(normalizedLinkedIn, keyword)
+          )
+        )
+        .map((requiredSkill) => requiredSkill.name);
+      const linkedinEvidence = linkedInText.trim()
+        ? [
+            {
+              id: 'linkedin-profile-import',
+              title: update.linkedinImportFileName
+                ? `LinkedIn import: ${update.linkedinImportFileName}`
+                : 'LinkedIn profile information',
+              sourceType: 'linkedin_profile' as const,
+              url: update.linkedinUrl,
+              language: 'LinkedIn',
+              skillsMatched: roleSkillsMentioned,
+              confidenceContribution: 0,
+              metricLabel: 'Profile claim · not independently verified',
+              timestamp: new Date().toISOString().split('T')[0],
+              verified: false,
+            },
+          ]
+        : [];
+
+      return {
+        ...currentProfile,
+        ...profileUpdate,
+        candidateName: importedCandidateName || currentProfile.candidateName,
+        atsScore: update.atsScore,
+        updatedAt: new Date().toISOString(),
+        overallReadiness,
+        skills: updatedSkills,
+        evidenceItems: [
+          ...currentProfile.evidenceItems.filter(
+            (item) => item.id !== 'linkedin-profile-import'
+          ),
+          ...linkedinEvidence,
+        ],
+      };
+    });
   };
 
   const handleQuickAnalyzeGithub = async (username: string) => {
@@ -145,7 +271,7 @@ export default function App() {
       });
       setProfile(generated);
       setCurrentSurface('dashboard');
-      setActiveTab('job-readiness');
+      setActiveTab('overview');
     } finally {
       setQuickLoadingUser(null);
     }
@@ -449,6 +575,7 @@ export default function App() {
                   onOpenVerifyModal={(skill) => setVerifyingSkill(skill)}
                   onOpenBuildModal={() => setBuildModalOpen(true)}
                   onQuickAnalyzeGithub={handleQuickAnalyzeGithub}
+                  onSaveProfileInsights={handleSaveProfileInsights}
                 />
               )}
               {activeTab === 'job-readiness' && (
@@ -485,6 +612,7 @@ export default function App() {
                 />
               )}
               {activeTab === 'documentation' && <DocumentationTab />}
+              {activeTab === 'roadmap' && <RoadmapTab profile={profile} />}
             </main>
           </div>
         </div>

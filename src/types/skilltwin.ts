@@ -8,6 +8,7 @@ export interface EvaluatedSkill {
   targetScore: number; // e.g. 75 or 80
   status: SkillStatus;
   claimedOnResume: boolean;
+  claimedOnLinkedIn?: boolean;
   verifiedByGithub: boolean;
   verifiedByAssessment: boolean;
   repoCount: number;
@@ -32,6 +33,7 @@ export interface EvidenceItem {
     | 'code_submission'
     | 'assessment'
     | 'resume_claim'
+    | 'linkedin_profile'
     | 'zip_artifact';
   url?: string;
   language: string;
@@ -139,6 +141,20 @@ export interface SkillTwinProfile {
   targetRole: RoleTemplate;
   customJobText?: string;
   resumeText: string;
+  resumeFileName?: string;
+  linkedinUrl?: string;
+  linkedinProfileText?: string;
+  linkedinImportFileName?: string;
+  linkedinSections?: {
+    about: string;
+    experience: string;
+    education: string;
+    skills: string;
+    certifications: string;
+    projects: string;
+    highlights: string;
+    posts: string;
+  };
   overallReadiness: number;
   evidenceConfidence: number;
   atsScore?: number;
